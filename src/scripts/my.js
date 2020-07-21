@@ -56,6 +56,7 @@ var vue = new Vue({
         logs: [],
         list: [],
         max: 50,
+        uploadReady: true,
     },
 
     // 為了讓v-repeat v-model v-on一起用
@@ -99,7 +100,7 @@ var vue = new Vue({
         }
         this.setOptionOn();
         $("#share").jsSocials({
-            shares: ["twitter", "facebook", "messenger", "line"]
+            shares: ["twitter", "facebook", "messenger", "line"],
         });
     },
 
@@ -124,6 +125,10 @@ var vue = new Vue({
                 var weight = parseFloat(option.weight, 10);
                 tmp.push([option.name, weight]);
             });
+
+            if (typeof google == 'undefined' || typeof google.visualization == 'undefined' || typeof google.visualization.arrayToDataTable != 'function') {
+                return false;
+            }
 
             var data = google.visualization.arrayToDataTable(tmp);
 
@@ -399,14 +404,18 @@ var vue = new Vue({
 
             this.rid = snapshot.key;
             this.s.url = this.s._url + '#' + this.rid;
-            if (this.rid != oldRid) {
-                FB.XFBML.parse();
-            }
 
             if (!$.cookie(this.hotKey)) {
                 $.cookie(this.hotKey, '1', { path: '/', expires: 1 });
                 this.incHot(snapshot.key);
             }
+
+            this.$nextTick(function() {
+                FB.XFBML.parse();
+                $("#share").jsSocials({
+                    shares: ["twitter", "facebook", "messenger", "line"],
+                });
+            });
         },
 
         // 人氣+1
@@ -538,6 +547,93 @@ var vue = new Vue({
 
         saveConfig: function() {
             $.cookie(this.cookieKey, this.c, { path: '/', expires: 365 });
+        },
+
+        deleteData: function(id) {
+            fire.ref('list/' + id).remove();
+            this.getList('my');
+        },
+
+        csvDownload: function() {
+            var filename = this.set.title + '-轉盤內容.csv';
+            var rows = [
+                ['名稱', '比重']
+            ];
+            this.set.options.map(function(option) {
+                var weight = parseFloat(option.weight, 10);
+                rows.push([option.name, weight]);
+            });
+
+            var processRow = function(row) {
+                var finalVal = '';
+                for (var j = 0; j < row.length; j++) {
+                    var innerValue = row[j] === null ? '' : row[j].toString();
+                    if (row[j] instanceof Date) {
+                        innerValue = row[j].toLocaleString();
+                    };
+                    var result = innerValue.replace(/"/g, '""');
+                    if (result.search(/("|,|\n)/g) >= 0)
+                        result = '"' + result + '"';
+                    if (j > 0)
+                        finalVal += ',';
+                    finalVal += result;
+                }
+                return finalVal + '\n';
+            };
+
+            var csvFile = '';
+            for (var i = 0; i < rows.length; i++) {
+                csvFile += processRow(rows[i]);
+            }
+
+            var blob = new Blob(["\uFEFF" + csvFile], { type: 'text/csv;charset=utf-8;' });
+            if (navigator.msSaveBlob) { // IE 10+
+                navigator.msSaveBlob(blob, filename);
+            } else {
+                var link = document.createElement("a");
+                if (link.download !== undefined) { // feature detection
+                    // Browsers that support HTML5 download attribute
+                    var url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", filename);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            }
+        },
+
+        csvUpload: function($event) {
+            var that = this;
+            var files = $event.target.files;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var rows = [];
+                var cval = e.target.result.split("\n");
+                // console.log(cval);
+                for (i in cval) {
+                    var data = cval[i].split(',').map(function(e) { return e.trim(); });
+                    if (data.length == 2) {
+                        if (data[0] == '名稱' && data[1] == '比重') {
+                            continue;
+                        }
+
+                        var weight = parseFloat(data[1], 10);
+                        rows.push({ name: data[0], weight: weight, on: true });
+                    }
+                }
+
+                if (rows) {
+                    that.set.$set('options', rows);
+                }
+            }
+
+            reader.readAsText(files.item(0));
+            this.uploadReady = false;
+            this.$nextTick(function() {
+                that.uploadReady = true;
+            })
         }
     }
 });
